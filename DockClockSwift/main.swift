@@ -117,7 +117,6 @@ private struct ForecastDayDisplay {
     let day: ForecastDay
     let dateWeekdayText: String
     let relativeLabel: String?
-    let temperatureRangeText: String
     let precipitationText: String
 }
 
@@ -680,10 +679,12 @@ final class ClockView: NSView {
         updateForecastPanel()
         positionForecastPanel(panel)
         panel.orderFrontRegardless()
+        panel.makeKey()
+        panel.makeFirstResponder(panel.contentView)
     }
 
     private func makeForecastPanel() -> NSPanel {
-        let forecastSize = NSSize(width: 460, height: 620)
+        let forecastSize = NSSize(width: 500, height: 700)
         let panel = FloatingPanel(
             contentRect: NSRect(origin: .zero, size: forecastSize),
             styleMask: [.borderless],
@@ -696,6 +697,7 @@ final class ClockView: NSView {
             days: forecastDays,
             onDismiss: { [weak self] in self?.dismissForecastPanel() }
         )
+        panel.title = "날씨 예보"
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -1362,43 +1364,48 @@ final class ForecastView: NSView {
     private var dailyDownButtonRect = NSRect.zero
     private var dailyForecastScrollRect = NSRect.zero
     private var currentButtonRect = NSRect.zero
+    private var closeButtonRect = NSRect.zero
     private var todayDateKey = ""
     private var yesterdayDateKey = ""
     private var relativeDayLabels: [String: String] = [:]
     private var textAttributesCache: [TextAttributesKey: [NSAttributedString.Key: Any]] = [:]
-    private let panelBackgroundColor = NSColor(calibratedRed: 0.045, green: 0.050, blue: 0.060, alpha: 0.985)
-    private let panelBorderColor = NSColor(calibratedRed: 0.30, green: 0.34, blue: 0.40, alpha: 1)
-    private let headerTitleFont = NSFont.systemFont(ofSize: 21, weight: .semibold)
+    private let panelBackgroundColor = NSColor(calibratedRed: 0.055, green: 0.075, blue: 0.115, alpha: 1)
+    private let panelBorderColor = NSColor(calibratedRed: 0.25, green: 0.32, blue: 0.43, alpha: 1)
+    private let headerTitleFont = NSFont.systemFont(ofSize: 23, weight: .bold)
     private let headerSubtitleFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private let sectionTitleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
+    private let sectionTitleFont = NSFont.systemFont(ofSize: 14, weight: .semibold)
+    private let captionFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+    private let versionFont = NSFont.monospacedDigitSystemFont(ofSize: 8, weight: .regular)
+    private let buildVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "개발"
     private let loadingFont = NSFont.systemFont(ofSize: 15, weight: .medium)
     private let pagerFont = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+    private let closeIconFont = NSFont.systemFont(ofSize: 18, weight: .regular)
     private let hourlyEmptyFont = NSFont.systemFont(ofSize: 13, weight: .medium)
-    private let hourlyTimeFont = NSFont.systemFont(ofSize: 8.5, weight: .medium)
-    private let hourlyTimeCurrentFont = NSFont.systemFont(ofSize: 8.5, weight: .bold)
-    private let hourlyIconFont = NSFont.systemFont(ofSize: 18, weight: .regular)
-    private let hourlyTempFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .bold)
-    private let hourlyPrecipFont = NSFont.systemFont(ofSize: 7.5, weight: .medium)
+    private let hourlyTimeFont = NSFont.systemFont(ofSize: 9.5, weight: .medium)
+    private let hourlyTimeCurrentFont = NSFont.systemFont(ofSize: 9.5, weight: .bold)
+    private let hourlyIconFont = NSFont.systemFont(ofSize: 20, weight: .regular)
+    private let hourlyTempFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+    private let hourlyPrecipFont = NSFont.systemFont(ofSize: 9, weight: .medium)
     private let dailyDateFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
     private let dailyDateCompactFont = NSFont.systemFont(ofSize: 11.4, weight: .semibold)
-    private let dailyRelativeFont = NSFont.systemFont(ofSize: 8.4, weight: .medium)
-    private let dailyIconFont = NSFont.systemFont(ofSize: 18, weight: .regular)
+    private let dailyRelativeFont = NSFont.systemFont(ofSize: 9, weight: .medium)
+    private let dailyIconFont = NSFont.systemFont(ofSize: 20, weight: .regular)
     private let dailyConditionFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private let dailyTempFont = NSFont.systemFont(ofSize: 8.4, weight: .semibold)
-    private let dailyPrecipFont = NSFont.systemFont(ofSize: 8.2, weight: .medium)
+    private let dailyTempFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
+    private let dailyPrecipFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
     private let currentButtonFont = NSFont.systemFont(ofSize: 12, weight: .semibold)
     private let whiteColor = NSColor.white
     private let headerSubtitleColor = NSColor(calibratedRed: 0.68, green: 0.73, blue: 0.80, alpha: 1)
     private let sectionTitleColor = NSColor(calibratedRed: 0.82, green: 0.86, blue: 0.92, alpha: 1)
     private let loadingTextColor = NSColor(calibratedRed: 0.78, green: 0.82, blue: 0.88, alpha: 1)
-    private let hourlyPanelColor = NSColor(calibratedRed: 0.075, green: 0.085, blue: 0.105, alpha: 1)
+    private let hourlyPanelColor = NSColor(calibratedRed: 0.09, green: 0.12, blue: 0.175, alpha: 1)
     private let hourlyEmptyTextColor = NSColor(calibratedRed: 0.66, green: 0.71, blue: 0.78, alpha: 1)
-    private let currentHighlightFillColor = NSColor(calibratedRed: 0.98, green: 0.88, blue: 0.18, alpha: 0.28)
-    private let selectedFillColor = NSColor(calibratedRed: 0.98, green: 0.88, blue: 0.18, alpha: 0.24)
-    private let highlightStrokeColor = NSColor(calibratedRed: 1.00, green: 0.92, blue: 0.22, alpha: 0.95)
+    private let currentHighlightFillColor = NSColor(calibratedRed: 0.25, green: 0.65, blue: 0.95, alpha: 0.22)
+    private let selectedFillColor = NSColor(calibratedRed: 0.14, green: 0.27, blue: 0.39, alpha: 1)
+    private let highlightStrokeColor = NSColor(calibratedRed: 0.43, green: 0.77, blue: 0.98, alpha: 0.9)
     private let alternatingCellFill = NSColor(calibratedWhite: 1, alpha: 0.025)
     private let dimAlternatingCellFill = NSColor(calibratedWhite: 1, alpha: 0.01)
-    private let currentHourTextColor = NSColor(calibratedRed: 1, green: 0.96, blue: 0.72, alpha: 1)
+    private let currentHourTextColor = NSColor(calibratedRed: 0.68, green: 0.87, blue: 1, alpha: 1)
     private let availableHourTextColor = NSColor(calibratedRed: 0.68, green: 0.73, blue: 0.80, alpha: 1)
     private let unavailableHourTextColor = NSColor(calibratedRed: 0.68, green: 0.73, blue: 0.80, alpha: 0.42)
     private let availableWhiteColor = NSColor(calibratedWhite: 1, alpha: 1)
@@ -1406,11 +1413,12 @@ final class ForecastView: NSView {
     private let unavailableTempColor = NSColor(calibratedWhite: 1, alpha: 0.38)
     private let availablePrecipColor = NSColor(calibratedRed: 0.62, green: 0.75, blue: 0.94, alpha: 1)
     private let unavailablePrecipColor = NSColor(calibratedRed: 0.62, green: 0.75, blue: 0.94, alpha: 0.35)
-    private let selectedDayTextColor = NSColor(calibratedRed: 1, green: 0.97, blue: 0.72, alpha: 1)
-    private let relativeSelectedColor = NSColor(calibratedRed: 1, green: 0.94, blue: 0.52, alpha: 1)
+    private let selectedDayTextColor = NSColor(calibratedRed: 0.85, green: 0.95, blue: 1, alpha: 1)
+    private let relativeSelectedColor = NSColor(calibratedRed: 0.55, green: 0.82, blue: 1, alpha: 1)
     private let relativeDefaultColor = NSColor(calibratedRed: 0.64, green: 0.70, blue: 0.78, alpha: 1)
     private let conditionColor = NSColor(calibratedRed: 0.88, green: 0.91, blue: 0.96, alpha: 1)
-    private let dailyTempColor = NSColor(calibratedRed: 0.92, green: 0.94, blue: 0.98, alpha: 1)
+    private let lowTempColor = NSColor(calibratedRed: 0.56, green: 0.77, blue: 0.98, alpha: 1)
+    private let highTempColor = NSColor(calibratedRed: 1, green: 0.74, blue: 0.52, alpha: 1)
     private let pagerEnabledFillColor = NSColor(calibratedRed: 0.12, green: 0.14, blue: 0.17, alpha: 1)
     private let pagerDisabledFillColor = NSColor(calibratedRed: 0.09, green: 0.10, blue: 0.12, alpha: 0.7)
     private let pagerBorderColor = NSColor(calibratedRed: 0.34, green: 0.39, blue: 0.48, alpha: 1)
@@ -1473,7 +1481,7 @@ final class ForecastView: NSView {
 
         NSGraphicsContext.current?.shouldAntialias = true
         let bounds = self.bounds
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
+        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 18, yRadius: 18)
         panelBackgroundColor.setFill()
         path.fill()
         panelBorderColor.setStroke()
@@ -1493,28 +1501,43 @@ final class ForecastView: NSView {
             return
         }
 
-        drawSectionTitle(hourlySectionTitle(), y: bounds.height - 102)
-        drawHourlyForecast(in: NSRect(x: 14, y: bounds.height - 280, width: bounds.width - 28, height: 168))
-
-        drawSectionTitle("날짜 예보", y: bounds.height - 304)
+        drawSectionTitle("날짜 예보", y: bounds.height - 122)
         drawDailyPagerButtons(in: bounds)
         dailyRowRects = [:]
-        let rowHeight: CGFloat = 34
-        let startY = bounds.height - 342
-        dailyForecastScrollRect = NSRect(x: 14, y: 64, width: bounds.width - 28, height: bounds.height - 350)
+        let rowHeight: CGFloat = 40
+        let startY = bounds.height - 172
+        dailyForecastScrollRect = NSRect(x: 18, y: startY - 6 * rowHeight, width: bounds.width - 36, height: 7 * rowHeight)
         for rowIndex in 0..<visibleDailyRowCount {
             let actualIndex = dailyListOffset + rowIndex
             guard dayDisplayRows.indices.contains(actualIndex) else { continue }
             let rowY = startY - CGFloat(rowIndex) * rowHeight
-            let rowRect = NSRect(x: 14, y: rowY, width: bounds.width - 28, height: rowHeight - 4)
+            let rowRect = NSRect(x: 18, y: rowY, width: bounds.width - 36, height: rowHeight - 4)
             dailyRowRects[actualIndex] = rowRect
             drawDailyRow(dayDisplayRows[actualIndex], in: rowRect, selected: actualIndex == selectedDayIndex)
         }
-        drawCurrentButton(in: bounds)
+        drawSectionTitle(hourlySectionTitle(), y: 252)
+        drawText("24시간 · 강수 확률", in: NSRect(x: bounds.width - 162, y: 254, width: 140, height: 15), font: captionFont, color: headerSubtitleColor, alignment: .right)
+        drawHourlyForecast(in: NSRect(x: 18, y: 38, width: bounds.width - 36, height: 204))
+        drawText("날짜를 누르면 아래 시간별 예보가 바뀝니다", in: NSRect(x: 22, y: 13, width: 310, height: 14), font: captionFont, color: headerSubtitleColor, alignment: .left)
+        drawText(buildVersion, in: NSRect(x: bounds.width - 132, y: 14, width: 110, height: 12), font: versionFont, color: headerSubtitleColor, alignment: .right)
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for rect in dailyRowRects.values {
+            addCursorRect(rect, cursor: .pointingHand)
+        }
+        for rect in [currentButtonRect, closeButtonRect, dailyUpButtonRect, dailyDownButtonRect] {
+            addCursorRect(rect, cursor: .pointingHand)
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        if closeButtonRect.contains(point) {
+            onDismiss()
+            return
+        }
         if dailyUpButtonRect.contains(point) {
             shiftDailyList(by: -1)
             return
@@ -1572,7 +1595,7 @@ final class ForecastView: NSView {
     private func drawHeader(in bounds: NSRect) {
         drawText(
             "날씨 예보",
-            in: NSRect(x: 18, y: bounds.height - 48, width: bounds.width - 36, height: 26),
+            in: NSRect(x: 22, y: bounds.height - 51, width: 260, height: 30),
             font: headerTitleFont,
             color: whiteColor,
             alignment: .left
@@ -1580,17 +1603,22 @@ final class ForecastView: NSView {
 
         drawText(
             subtitle,
-            in: NSRect(x: 18, y: bounds.height - 70, width: bounds.width - 36, height: 18),
+            in: NSRect(x: 23, y: bounds.height - 73, width: 280, height: 18),
             font: headerSubtitleFont,
             color: headerSubtitleColor,
             alignment: .left
         )
+        panelBorderColor.withAlphaComponent(0.55).setFill()
+        NSRect(x: 22, y: bounds.height - 91, width: bounds.width - 44, height: 1).fill()
+        drawCurrentButton(in: bounds)
+        closeButtonRect = NSRect(x: bounds.width - 48, y: bounds.height - 52, width: 28, height: 28)
+        drawPagerButton("×", in: closeButtonRect, enabled: true)
     }
 
     private func drawSectionTitle(_ title: String, y: CGFloat) {
         drawText(
             title,
-            in: NSRect(x: 18, y: y, width: bounds.width - 112, height: 18),
+            in: NSRect(x: 22, y: y, width: bounds.width - 174, height: 21),
             font: sectionTitleFont,
             color: sectionTitleColor,
             alignment: .left
@@ -1598,10 +1626,14 @@ final class ForecastView: NSView {
     }
 
     private func drawDailyPagerButtons(in bounds: NSRect) {
-        dailyUpButtonRect = NSRect(x: bounds.width - 80, y: bounds.height - 310, width: 28, height: 24)
-        dailyDownButtonRect = NSRect(x: bounds.width - 46, y: bounds.height - 310, width: 28, height: 24)
-        drawPagerButton("▲", in: dailyUpButtonRect, enabled: dailyListOffset > 0)
-        drawPagerButton("▼", in: dailyDownButtonRect, enabled: dailyListOffset < maxDailyListOffset)
+        dailyUpButtonRect = NSRect(x: bounds.width - 82, y: bounds.height - 123, width: 28, height: 24)
+        dailyDownButtonRect = NSRect(x: bounds.width - 48, y: bounds.height - 123, width: 28, height: 24)
+        drawPagerButton("⌃", in: dailyUpButtonRect, enabled: dailyListOffset > 0)
+        drawPagerButton("⌄", in: dailyDownButtonRect, enabled: dailyListOffset < maxDailyListOffset)
+        let lastVisible = min(days.count, dailyListOffset + visibleDailyRowCount)
+        let range = days.isEmpty ? "" : "\(dailyListOffset + 1)–\(lastVisible) / \(days.count)일"
+        drawText(range, in: NSRect(x: 114, y: bounds.height - 119, width: 104, height: 15), font: captionFont, color: headerSubtitleColor, alignment: .left)
+        drawText("최저 · 최고", in: NSRect(x: 259, y: bounds.height - 119, width: 137, height: 15), font: captionFont, color: headerSubtitleColor, alignment: .center)
     }
 
     private func drawPagerButton(_ text: String, in rect: NSRect, enabled: Bool) {
@@ -1616,10 +1648,12 @@ final class ForecastView: NSView {
             borderPath.stroke()
         }
 
+        let isCloseButton = text == "×"
+        let textHeight: CGFloat = isCloseButton ? 24 : 16
         drawText(
             text,
-            in: rect.offsetBy(dx: 0, dy: 4),
-            font: pagerFont,
+            in: NSRect(x: rect.minX, y: rect.midY - textHeight / 2, width: rect.width, height: textHeight),
+            font: isCloseButton ? closeIconFont : pagerFont,
             color: enabled ? whiteColor : pagerDisabledTextColor,
             alignment: .center
         )
@@ -1655,15 +1689,16 @@ final class ForecastView: NSView {
 
         let columns: CGFloat = 8
         let rows: CGFloat = 3
-        let cellWidth = rect.width / columns
-        let cellHeight = rect.height / rows
+        let grid = rect.insetBy(dx: 6, dy: 6)
+        let cellWidth = grid.width / columns
+        let cellHeight = grid.height / rows
         let currentHour = Self.calendar.component(.hour, from: Date())
 
         for (index, hour) in hourDisplayRows.enumerated() {
             let column = CGFloat(index % 8)
             let row = CGFloat(index / 8)
-            let x = rect.minX + column * cellWidth
-            let y = rect.maxY - CGFloat(row + 1) * cellHeight
+            let x = grid.minX + column * cellWidth
+            let y = grid.maxY - CGFloat(row + 1) * cellHeight
             let cell = NSRect(x: x, y: y, width: cellWidth, height: cellHeight)
             let isCurrentHour = selectedDayIsToday && hour.hour == currentHour
             let isAvailable = hour.isAvailable
@@ -1684,29 +1719,29 @@ final class ForecastView: NSView {
             }
 
             drawText(
-                hour.timeText,
-                in: NSRect(x: cell.minX + 3, y: cell.maxY - 17, width: cell.width - 6, height: 12),
+                isCurrentHour ? "지금" : hour.timeText,
+                in: NSRect(x: cell.minX + 3, y: cell.maxY - 15, width: cell.width - 6, height: 12),
                 font: isCurrentHour ? hourlyTimeCurrentFont : hourlyTimeFont,
                 color: isCurrentHour ? currentHourTextColor : (isAvailable ? availableHourTextColor : unavailableHourTextColor),
                 alignment: .center
             )
             drawText(
                 hour.icon,
-                in: NSRect(x: cell.minX + 3, y: cell.minY + 24, width: cell.width - 6, height: 20),
+                in: NSRect(x: cell.minX + 3, y: cell.minY + 27, width: cell.width - 6, height: 22),
                 font: hourlyIconFont,
                 color: isAvailable ? availableWhiteColor : unavailableIconColor,
                 alignment: .center
             )
             drawText(
                 hour.temperatureText,
-                in: NSRect(x: cell.minX + 3, y: cell.minY + 14, width: cell.width - 6, height: 13),
+                in: NSRect(x: cell.minX + 3, y: cell.minY + 14, width: cell.width - 6, height: 15),
                 font: hourlyTempFont,
                 color: isAvailable ? availableWhiteColor : unavailableTempColor,
                 alignment: .center
             )
             drawText(
                 hour.precipitationText,
-                in: NSRect(x: cell.minX + 3, y: cell.minY + 4, width: cell.width - 6, height: 10),
+                in: NSRect(x: cell.minX + 3, y: cell.minY + 3, width: cell.width - 6, height: 12),
                 font: hourlyPrecipFont,
                 color: isAvailable ? availablePrecipColor : unavailablePrecipColor,
                 alignment: .center
@@ -1730,7 +1765,7 @@ final class ForecastView: NSView {
         let relativeLabel = display.relativeLabel
         drawText(
             display.dateWeekdayText,
-            in: NSRect(x: rect.minX + 10, y: rect.minY + (relativeLabel == nil ? 7 : 13), width: 72, height: 14),
+            in: NSRect(x: rect.minX + 12, y: rect.minY + (relativeLabel == nil ? 10 : 17), width: 72, height: 15),
             font: relativeLabel == nil ? dailyDateFont : dailyDateCompactFont,
             color: selected ? selectedDayTextColor : whiteColor,
             alignment: .left
@@ -1739,7 +1774,7 @@ final class ForecastView: NSView {
         if let relativeLabel {
             drawText(
                 relativeLabel,
-                in: NSRect(x: rect.minX + 10, y: rect.minY + 4, width: 72, height: 10),
+                in: NSRect(x: rect.minX + 12, y: rect.minY + 5, width: 72, height: 12),
                 font: dailyRelativeFont,
                 color: selected ? relativeSelectedColor : relativeDefaultColor,
                 alignment: .left
@@ -1748,7 +1783,7 @@ final class ForecastView: NSView {
 
         drawText(
             day.icon,
-            in: NSRect(x: rect.minX + 86, y: rect.minY + 4, width: 28, height: 22),
+            in: NSRect(x: rect.minX + 86, y: rect.minY + 7, width: 28, height: 24),
             font: dailyIconFont,
             color: whiteColor,
             alignment: .center
@@ -1756,23 +1791,36 @@ final class ForecastView: NSView {
 
         drawText(
             day.condition,
-            in: NSRect(x: rect.minX + 122, y: rect.minY + 7, width: rect.width - 292, height: 16),
+            in: NSRect(x: rect.minX + 120, y: rect.minY + 10, width: 112, height: 17),
             font: dailyConditionFont,
             color: conditionColor,
             alignment: .left
         )
 
         drawText(
-            display.temperatureRangeText,
-            in: NSRect(x: rect.maxX - 160, y: rect.minY + 8, width: 94, height: 14),
+            "\(day.lowTemp)°",
+            in: NSRect(x: rect.minX + 242, y: rect.minY + 10, width: 34, height: 17),
             font: dailyTempFont,
-            color: dailyTempColor,
+            color: lowTempColor,
             alignment: .right
         )
 
+        let track = NSRect(x: rect.minX + 286, y: rect.midY - 3, width: 60, height: 6)
+        panelBorderColor.withAlphaComponent(0.45).setFill()
+        NSBezierPath(roundedRect: track, xRadius: 3, yRadius: 3).fill()
+        // Use the same scale across all dates so each temperature range is comparable.
+        let minTemp = days.map(\.lowTemp).min() ?? day.lowTemp
+        let maxTemp = max(minTemp + 1, days.map(\.highTemp).max() ?? day.highTemp)
+        let scale = CGFloat(maxTemp - minTemp)
+        let start = CGFloat(day.lowTemp - minTemp) / scale * (track.width - 4)
+        let end = CGFloat(day.highTemp - minTemp) / scale * (track.width - 4) + 4
+        let range = NSRect(x: track.minX + start, y: track.minY, width: max(4, end - start), height: track.height)
+        NSGradient(starting: lowTempColor, ending: highTempColor)?.draw(in: NSBezierPath(roundedRect: range, xRadius: 3, yRadius: 3), angle: 0)
+        drawText("\(day.highTemp)°", in: NSRect(x: rect.minX + 354, y: rect.minY + 10, width: 34, height: 17), font: dailyTempFont, color: highTempColor, alignment: .left)
+
         drawText(
             display.precipitationText,
-            in: NSRect(x: rect.maxX - 64, y: rect.minY + 8, width: 52, height: 14),
+            in: NSRect(x: rect.maxX - 68, y: rect.minY + 10, width: 56, height: 16),
             font: dailyPrecipFont,
             color: availablePrecipColor,
             alignment: .right
@@ -1790,8 +1838,7 @@ final class ForecastView: NSView {
                 day: day,
                 dateWeekdayText: "\(day.dateText) \(day.weekdayText)",
                 relativeLabel: relativeDayLabel(for: day),
-                temperatureRangeText: "최고 \(day.highTemp)°  최저 \(day.lowTemp)°",
-                precipitationText: "강수량 \(day.precipitation)%"
+                precipitationText: "강수 \(day.precipitation)%"
             )
         }
     }
@@ -1804,14 +1851,14 @@ final class ForecastView: NSView {
                 timeText: hour.timeText,
                 icon: hour.icon,
                 temperatureText: hour.temperature.map { "\($0)°" } ?? "--",
-                precipitationText: hour.precipitation.map { "강수 \($0)%" } ?? "강수 --",
+                precipitationText: hour.precipitation.map { "\($0)%" } ?? "--",
                 isAvailable: isAvailable
             )
         }
     }
 
     private func drawCurrentButton(in bounds: NSRect) {
-        currentButtonRect = NSRect(x: bounds.width - 94, y: 18, width: 72, height: 30)
+        currentButtonRect = NSRect(x: bounds.width - 136, y: bounds.height - 53, width: 76, height: 30)
         let selected = selectedDayIsToday
         let fill = selected ? selectedFillColor : pagerEnabledFillColor
         fill.setFill()
@@ -1825,7 +1872,7 @@ final class ForecastView: NSView {
         }
 
         drawText(
-            "현재",
+            "오늘",
             in: currentButtonRect.insetBy(dx: 0, dy: 7),
             font: currentButtonFont,
             color: selected ? currentHourTextColor : whiteColor,
