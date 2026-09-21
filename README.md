@@ -9,6 +9,7 @@ Small always-on-top clock, weather, date, and calendar widget positioned above t
 - The widget always shows the default location, **수원 인계동**. The forecast also opens at this location every time.
 - Click **지역 검색** to find a city, neighborhood, or travel destination, then select the matching address. Press Enter or click **검색** to submit a query. **기본 지역** returns to 수원 인계동 immediately.
 - The search window keeps four recently selected destinations. Searching a destination does not change the default location or request access to the device's current location.
+- Click **×** beside a recent destination to remove only that entry. Removal is saved across app restarts; the default location stays available.
 - Travel forecasts use the destination's time zone when available; the subtitle explicitly says **한국 시간** if it is unavailable. Cached forecasts are separated by location, preserving existing Suwon history.
 - Click the time/date area to open or close the calendar.
 - Right-click the widget to open a context menu with "세부 설정..." and "종료".
@@ -30,7 +31,7 @@ For development runs, `MSN_WEATHER_API_KEY` can be supplied as an environment va
 
 The app is native Swift/AppKit. On an Apple Silicon Mac with Xcode Command Line Tools, run `./build_app.sh` to compile and ad-hoc sign a staged app in `build/` and create `dist/WeatherCalendar-macOS.zip`. The build script does not replace the installed app.
 
-Current build: **2026.09.21.008**. The build number is visible in the forecast footer.
+Current build: **2026.09.21.010**. The build number is visible in the forecast footer.
 
 Location search uses Apple's [MKLocalSearch](https://developer.apple.com/documentation/mapkit/mklocalsearch). It requires an internet connection, without an additional API key. Weather continues to use the existing local MSN key.
 

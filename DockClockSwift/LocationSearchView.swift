@@ -7,7 +7,9 @@ final class LocationSearchView: NSView, NSSearchFieldDelegate {
     private let searchField = NSSearchField()
     private let message = NSTextField(labelWithString: "")
     private var resultButtons: [NSButton] = []
+    private var removeButtons: [NSButton] = []
     private var locations: [WeatherLocation] = []
+    private var showingRecentLocations = false
     private var search: MKLocalSearch?
     private var requestID = UUID()
     private static let recentKey = "DockClockRecentWeatherLocationsV1"
@@ -138,13 +140,18 @@ final class LocationSearchView: NSView, NSSearchFieldDelegate {
     private func showRecentLocations() {
         let recent = Self.recentLocations().filter { !$0.isHome }
         message.stringValue = recent.isEmpty ? "기본 지역 · 여행지 검색은 기본 지역을 바꾸지 않습니다" : "기본 지역 · 최근 검색"
-        showLocations([.home] + Array(recent.prefix(4)))
+        showLocations([.home] + Array(recent.prefix(4)), allowsRemoval: true)
     }
 
-    private func showLocations(_ locations: [WeatherLocation]) {
+    private func showLocations(_ locations: [WeatherLocation], allowsRemoval: Bool = false) {
         self.locations = locations
+        showingRecentLocations = allowsRemoval
         resultButtons.forEach { $0.removeFromSuperview() }
+        removeButtons.forEach { $0.removeFromSuperview() }
+        removeButtons = []
         resultButtons = locations.enumerated().map { index, location in
+            let canRemove = allowsRemoval && !location.isHome
+            let rowY = 228 - CGFloat(index) * 52
             let button = NSButton(title: "", target: self, action: #selector(selectResult(_:)))
             button.tag = index
             button.isBordered = false
@@ -152,7 +159,7 @@ final class LocationSearchView: NSView, NSSearchFieldDelegate {
             button.wantsLayer = true
             button.layer?.backgroundColor = NSColor(calibratedRed: 0.12, green: 0.16, blue: 0.22, alpha: 1).cgColor
             button.layer?.cornerRadius = 9
-            button.frame = NSRect(x: 22, y: 228 - CGFloat(index) * 52, width: 416, height: 46)
+            button.frame = NSRect(x: 22, y: rowY, width: canRemove ? 376 : 416, height: 46)
             let title = NSMutableAttributedString(string: "  \(location.name)\n", attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold), .foregroundColor: NSColor.white])
             title.append(NSAttributedString(string: "  \(location.detail)", attributes: [.font: NSFont.systemFont(ofSize: 10), .foregroundColor: NSColor(calibratedWhite: 0.72, alpha: 1)]))
             let paragraph = NSMutableParagraphStyle()
@@ -162,8 +169,34 @@ final class LocationSearchView: NSView, NSSearchFieldDelegate {
             button.setAccessibilityLabel("\(location.name), \(location.detail) 날씨 보기")
             button.toolTip = "\(location.name) · \(location.detail)"
             addSubview(button)
+            if canRemove {
+                let remove = NSButton(title: "×", target: self, action: #selector(removeRecentLocation(_:)))
+                remove.tag = index
+                remove.frame = NSRect(x: 406, y: rowY + 8, width: 32, height: 30)
+                remove.isBordered = false
+                remove.font = .systemFont(ofSize: 20, weight: .regular)
+                remove.contentTintColor = .secondaryLabelColor
+                remove.wantsLayer = true
+                remove.layer?.backgroundColor = NSColor(calibratedWhite: 0.18, alpha: 1).cgColor
+                remove.layer?.cornerRadius = 8
+                let label = "\(location.name) 최근 기록 삭제"
+                remove.toolTip = label
+                remove.setAccessibilityLabel(label)
+                addSubview(remove)
+                removeButtons.append(remove)
+            }
             return button
         }
+    }
+
+    @objc private func removeRecentLocation(_ sender: NSButton) {
+        guard showingRecentLocations, locations.indices.contains(sender.tag) else { return }
+        let location = locations[sender.tag]
+        guard !location.isHome else { return }
+        let remaining = Self.recentLocations().filter { $0.id != location.id }
+        guard let data = try? JSONEncoder().encode(remaining) else { return }
+        UserDefaults.standard.set(data, forKey: Self.recentKey)
+        showRecentLocations()
     }
 
     @objc private func selectResult(_ sender: NSButton) {
