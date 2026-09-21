@@ -115,7 +115,6 @@ final class ClockView: NSView {
     private var moveStartFrame = NSRect.zero
     private var didMoveWindow = false
     private var calendarPanel: NSPanel?
-    private var settingsPanel: NSPanel?
     private var forecastPanel: NSPanel?
     private var forecastHours: [ForecastHour] = []
     private var forecastDays: [ForecastDay] = []
@@ -576,9 +575,14 @@ final class ClockView: NSView {
 
     private func contextMenu() -> NSMenu {
         let menu = NSMenu()
-        let settingsItem = NSMenuItem(title: "세부 설정...", action: #selector(openSettingsFromMenu(_:)), keyEquivalent: "")
-        settingsItem.target = self
-        menu.addItem(settingsItem)
+        let secondsItem = NSMenuItem(title: "시간에 초 표시", action: #selector(toggleSecondsFromMenu(_:)), keyEquivalent: "")
+        secondsItem.target = self
+        secondsItem.state = showSeconds ? .on : .off
+        menu.addItem(secondsItem)
+        let autostartItem = NSMenuItem(title: "맥 시작 시 자동 실행", action: #selector(toggleAutostartFromMenu(_:)), keyEquivalent: "")
+        autostartItem.target = self
+        autostartItem.state = AutostartManager.isEnabled ? .on : .off
+        menu.addItem(autostartItem)
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "종료", action: #selector(quitFromMenu(_:)), keyEquivalent: "q")
         quitItem.target = self
@@ -586,42 +590,26 @@ final class ClockView: NSView {
         return menu
     }
 
-    @objc private func openSettingsFromMenu(_ sender: Any?) {
-        showSettingsPanel()
+    @objc private func toggleSecondsFromMenu(_ sender: NSMenuItem) {
+        setShowSeconds(!showSeconds)
+        sender.state = showSeconds ? .on : .off
+    }
+
+    @objc private func toggleAutostartFromMenu(_ sender: NSMenuItem) {
+        do {
+            try AutostartManager.setEnabled(!AutostartManager.isEnabled)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "자동 실행 설정을 저장하지 못했습니다."
+            alert.informativeText = "권한 또는 파일 경로 문제일 수 있습니다."
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+        sender.state = AutostartManager.isEnabled ? .on : .off
     }
 
     @objc private func quitFromMenu(_ sender: Any?) {
         NSApp.terminate(nil)
-    }
-
-    private func showSettingsPanel() {
-        let panel = settingsPanel ?? makeSettingsPanel()
-        settingsPanel = panel
-        positionPopupPanel(panel, preferredAbove: true)
-        panel.orderFrontRegardless()
-        panel.makeKey()
-    }
-
-    private func makeSettingsPanel() -> NSPanel {
-        let settingsSize = NSSize(width: 320, height: 220)
-        let panel = FloatingPanel(
-            contentRect: NSRect(origin: .zero, size: settingsSize),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentView = SettingsView(
-            frame: NSRect(origin: .zero, size: settingsSize),
-            clockView: self,
-            onDismiss: { [weak self] in self?.dismissSettingsPanel() }
-        )
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.level = .statusBar
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        panel.hidesOnDeactivate = false
-        return panel
     }
 
     private func toggleForecastPanel() {
@@ -631,7 +619,6 @@ final class ClockView: NSView {
         }
 
         dismissCalendarPanel()
-        dismissSettingsPanel()
         let panel = makeForecastPanel()
         forecastPanel = panel
         updateForecastPanel()
@@ -678,7 +665,6 @@ final class ClockView: NSView {
         }
 
         dismissForecastPanel()
-        dismissSettingsPanel()
         let panel = makeCalendarPanel()
         calendarPanel = panel
         positionCalendarPanel(panel)
@@ -688,7 +674,6 @@ final class ClockView: NSView {
     private func closePopupPanels() {
         dismissCalendarPanel()
         dismissForecastPanel()
-        dismissSettingsPanel()
     }
 
     private func dismissCalendarPanel() {
@@ -702,12 +687,6 @@ final class ClockView: NSView {
         forecastPanel?.orderOut(nil)
         forecastPanel?.contentView = nil
         forecastPanel = nil
-    }
-
-    private func dismissSettingsPanel() {
-        settingsPanel?.orderOut(nil)
-        settingsPanel?.contentView = nil
-        settingsPanel = nil
     }
 
     private func makeCalendarPanel() -> NSPanel {
@@ -1562,167 +1541,6 @@ final class ForecastView: NSView {
 
     private func dateKey(for date: Date) -> String {
         dateKeyFormatter.string(from: date)
-    }
-}
-
-final class SettingsView: NSView {
-    private weak var clockView: ClockView?
-    private let onDismiss: () -> Void
-    private var secondsCheckbox: NSButton!
-    private var autostartCheckbox: NSButton!
-    private var closeButton: NSButton!
-    private var textAttributesCache: [TextAttributesKey: [NSAttributedString.Key: Any]] = [:]
-    private let panelBackgroundColor = NSColor(calibratedRed: 0.045, green: 0.050, blue: 0.060, alpha: 0.985)
-    private let panelBorderColor = NSColor(calibratedRed: 0.30, green: 0.34, blue: 0.40, alpha: 1)
-    private let dividerColor = NSColor(calibratedRed: 0.22, green: 0.25, blue: 0.31, alpha: 1)
-    private let titleFont = NSFont.systemFont(ofSize: 21, weight: .semibold)
-    private let subtitleFont = NSFont.systemFont(ofSize: 12, weight: .medium)
-    private let subtitleColor = NSColor(calibratedRed: 0.68, green: 0.73, blue: 0.80, alpha: 1)
-
-    init(frame frameRect: NSRect, clockView: ClockView, onDismiss: @escaping () -> Void) {
-        self.clockView = clockView
-        self.onDismiss = onDismiss
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
-        setupControls()
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var acceptsFirstResponder: Bool {
-        true
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        NSGraphicsContext.current?.shouldAntialias = true
-        let bounds = self.bounds
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 12, yRadius: 12)
-        panelBackgroundColor.setFill()
-        path.fill()
-        panelBorderColor.setStroke()
-        path.lineWidth = 1
-        path.stroke()
-
-        drawText(
-            "세부 설정",
-            in: NSRect(x: 18, y: bounds.height - 48, width: bounds.width - 36, height: 26),
-            font: titleFont,
-            color: .white,
-            alignment: .left
-        )
-
-        drawText(
-            "Mac-dockbar clock",
-            in: NSRect(x: 18, y: bounds.height - 70, width: bounds.width - 36, height: 18),
-            font: subtitleFont,
-            color: subtitleColor,
-            alignment: .left
-        )
-
-        dividerColor.setStroke()
-        let line = NSBezierPath()
-        line.move(to: NSPoint(x: 18, y: 56))
-        line.line(to: NSPoint(x: bounds.width - 18, y: 56))
-        line.lineWidth = 1
-        line.stroke()
-    }
-
-    override func rightMouseDown(with event: NSEvent) {
-        onDismiss()
-    }
-
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
-            onDismiss()
-            return
-        }
-        super.keyDown(with: event)
-    }
-
-    private func setupControls() {
-        secondsCheckbox = NSButton(checkboxWithTitle: "시간에 초 표시", target: self, action: #selector(toggleSeconds(_:)))
-        secondsCheckbox.frame = NSRect(x: 18, y: 112, width: 260, height: 28)
-        secondsCheckbox.state = clockView?.currentShowSeconds() == true ? .on : .off
-        secondsCheckbox.attributedTitle = NSAttributedString(
-            string: "시간에 초 표시",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
-                .foregroundColor: NSColor.white,
-            ]
-        )
-        addSubview(secondsCheckbox)
-
-        autostartCheckbox = NSButton(checkboxWithTitle: "맥 시작 시 자동 실행", target: self, action: #selector(toggleAutostart(_:)))
-        autostartCheckbox.frame = NSRect(x: 18, y: 82, width: 260, height: 28)
-        autostartCheckbox.state = AutostartManager.isEnabled ? .on : .off
-        autostartCheckbox.attributedTitle = NSAttributedString(
-            string: "맥 시작 시 자동 실행",
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 14, weight: .medium),
-                .foregroundColor: NSColor.white,
-            ]
-        )
-        addSubview(autostartCheckbox)
-
-        closeButton = NSButton(title: "닫기", target: self, action: #selector(closeSettings(_:)))
-        closeButton.frame = NSRect(x: bounds.width - 88, y: 18, width: 70, height: 28)
-        closeButton.bezelStyle = .rounded
-        closeButton.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        addSubview(closeButton)
-    }
-
-    @objc private func toggleSeconds(_ sender: NSButton) {
-        clockView?.setShowSeconds(sender.state == .on)
-    }
-
-    @objc private func toggleAutostart(_ sender: NSButton) {
-        do {
-            try AutostartManager.setEnabled(sender.state == .on)
-        } catch {
-            sender.state = AutostartManager.isEnabled ? .on : .off
-            showSettingsError("자동 실행 설정을 저장하지 못했습니다.")
-        }
-    }
-
-    @objc private func closeSettings(_ sender: Any?) {
-        onDismiss()
-    }
-
-    private func showSettingsError(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.informativeText = "권한 또는 파일 경로 문제일 수 있습니다."
-        alert.alertStyle = .warning
-        alert.runModal()
-    }
-
-    private func drawText(_ text: String, in rect: NSRect, font: NSFont, color: NSColor, alignment: NSTextAlignment) {
-        let key = TextAttributesKey(font: ObjectIdentifier(font), color: ObjectIdentifier(color), alignment: alignment.rawValue)
-        let attributes: [NSAttributedString.Key: Any]
-        if let cached = textAttributesCache[key] {
-            attributes = cached
-        } else {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.alignment = alignment
-            paragraph.lineBreakMode = .byTruncatingTail
-            let made: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: color,
-                .paragraphStyle: paragraph,
-            ]
-            textAttributesCache[key] = made
-            attributes = made
-        }
-        text.draw(in: rect, withAttributes: attributes)
     }
 }
 

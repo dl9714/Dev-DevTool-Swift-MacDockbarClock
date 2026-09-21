@@ -12,8 +12,7 @@ Small always-on-top clock, weather, date, and calendar widget positioned above t
 - Click **×** beside a recent destination to remove only that entry. Removal is saved across app restarts; the default location stays available.
 - Travel forecasts use the destination's time zone when available; the subtitle explicitly says **한국 시간** if it is unavailable. Cached forecasts are separated by location, preserving existing Suwon history.
 - Click the time/date area to open or close the calendar.
-- Right-click the widget to open a context menu with "세부 설정..." and "종료".
-- In "세부 설정...", toggle seconds display and launch at login.
+- Right-click the widget to toggle **시간에 초 표시** or **맥 시작 시 자동 실행** directly. Checkmarks show the current settings; **종료** is available in the same menu.
 - In the calendar, click the arrow buttons to move between months and click "오늘" to return to the current month.
 - Drag the widget to move it.
 
@@ -31,7 +30,7 @@ For development runs, `MSN_WEATHER_API_KEY` can be supplied as an environment va
 
 The app is native Swift/AppKit. On an Apple Silicon Mac with Xcode Command Line Tools, run `./build_app.sh` to compile and ad-hoc sign a staged app in `build/` and create `dist/WeatherCalendar-macOS.zip`. The build script does not replace the installed app.
 
-Current build: **2026.09.21.010**. The build number is visible in the forecast footer.
+Current build: **2026.09.21.012**. The build number is visible in the forecast footer.
 
 Location search uses Apple's [MKLocalSearch](https://developer.apple.com/documentation/mapkit/mklocalsearch). It requires an internet connection, without an additional API key. Weather continues to use the existing local MSN key.
 
