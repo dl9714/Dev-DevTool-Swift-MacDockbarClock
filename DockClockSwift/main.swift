@@ -11,8 +11,6 @@ private let marginAboveDock: CGFloat = 2
 private let savedFrameKey = "DockClockWindowFrame"
 private let savedCustomSizeKey = "DockClockUserSized"
 private let showSecondsKey = "DockClockShowSeconds"
-private let weatherCacheKey = "DockClockWeatherHourlyCacheV1"
-private let forecastRequestDayCount = 15
 
 enum AutostartManager {
     private static let label = "local.mac.dockbar.clock.loginitem"
@@ -55,47 +53,6 @@ final class FloatingPanel: NSPanel {
     override var canBecomeMain: Bool {
         true
     }
-}
-
-struct ForecastDay: Equatable {
-    let dateKey: String
-    let dateText: String
-    let weekdayText: String
-    let hourlyTitle: String
-    let icon: String
-    let condition: String
-    let highTemp: Int
-    let lowTemp: Int
-    let precipitation: Int
-    let summary: String
-    let hours: [ForecastHour]
-}
-
-extension ForecastDay {
-    func replacingHours(_ hours: [ForecastHour]) -> ForecastDay {
-        ForecastDay(
-            dateKey: dateKey,
-            dateText: dateText,
-            weekdayText: weekdayText,
-            hourlyTitle: hourlyTitle,
-            icon: icon,
-            condition: condition,
-            highTemp: highTemp,
-            lowTemp: lowTemp,
-            precipitation: precipitation,
-            summary: summary,
-            hours: hours
-        )
-    }
-}
-
-struct ForecastHour: Codable, Equatable {
-    let hour: Int
-    let timeText: String
-    let icon: String
-    let temperature: Int?
-    let precipitation: Int?
-    let condition: String
 }
 
 private struct TextAttributesKey: Hashable {
@@ -163,6 +120,7 @@ final class ClockView: NSView {
     private var forecastHours: [ForecastHour] = []
     private var forecastDays: [ForecastDay] = []
     private var weatherRequestInFlight = false
+    private var weatherError: String?
     private let timeFontWithSeconds = NSFont.monospacedDigitSystemFont(ofSize: 19, weight: .bold)
     private let timeFontWithoutSeconds = NSFont.monospacedDigitSystemFont(ofSize: 21, weight: .bold)
     private let dateFont = NSFont.monospacedDigitSystemFont(ofSize: 10.8, weight: .medium)
@@ -710,6 +668,7 @@ final class ClockView: NSView {
     private func updateForecastPanel() {
         guard let forecastView = forecastPanel?.contentView as? ForecastView else { return }
         forecastView.update(hours: forecastHours, days: forecastDays)
+        if forecastDays.isEmpty, let weatherError { forecastView.showHomeError(weatherError) }
     }
 
     private func toggleCalendarPanel() {
@@ -739,6 +698,7 @@ final class ClockView: NSView {
     }
 
     private func dismissForecastPanel() {
+        (forecastPanel?.contentView as? ForecastView)?.prepareForDismissal()
         forecastPanel?.orderOut(nil)
         forecastPanel?.contentView = nil
         forecastPanel = nil
@@ -816,535 +776,30 @@ final class ClockView: NSView {
     func fetchWeather() {
         guard !weatherRequestInFlight else { return }
         weatherRequestInFlight = true
-
-        let environmentKey = ProcessInfo.processInfo.environment["MSN_WEATHER_API_KEY"]
-        let savedKey = UserDefaults.standard.string(forKey: "MSNWeatherAPIKey")
-        guard let weatherAPIKey = environmentKey ?? savedKey, !weatherAPIKey.isEmpty else {
-            weatherRequestInFlight = false
-            weatherTempText = "--°C"
-            needsDisplay = true
-            return
-        }
-
-        let urlString = "https://api.msn.com/weather/overview?appId=9e21380c-ff19-4c78-b4ea-19558e93a5d3&apiKey=\(weatherAPIKey)&ocid=superapp-hp-weather&wrapOData=false&includemapsmetadata=true&includenowcasting=true&feature=lifeday&lifeDays=\(forecastRequestDayCount)&lifeModes=2&locale=ko-kr&lat=37.2596985&lon=127.0270274&units=C&days=\(forecastRequestDayCount)"
-        guard let url = URL(string: urlString) else {
-            weatherRequestInFlight = false
-            return
-        }
-
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard
-                let data,
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let responses = json["responses"] as? [[String: Any]],
-                let firstResponse = responses.first,
-                let weatherList = firstResponse["weather"] as? [[String: Any]],
-                let firstWeather = weatherList.first,
-                let current = firstWeather["current"] as? [String: Any],
-                let temperature = current["temp"] as? Double
-            else {
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.weatherRequestInFlight = false
-                    if self.forecastDays.isEmpty {
-                        self.weatherIconText = "⛅"
-                        self.weatherPlaceText = "수원"
-                        self.weatherTempText = "--°C"
-                        self.forecastHours = []
-                        self.forecastDays = []
-                        self.markLayoutDirty()
-                        self.updateForecastPanel()
-                        self.needsDisplay = true
-                    }
-                }
-                return
-            }
-
-            let roundedTemp = Int(temperature.rounded())
-            let condition = (current["cap"] as? String) ?? (current["pvdrCap"] as? String) ?? ""
-            let icon = Self.weatherIcon(for: condition)
-            let currentHour = Self.weatherCalendar.component(.hour, from: Date())
-            let currentForecastHour = ForecastHour(
-                hour: currentHour,
-                timeText: Self.hourLabel(for: currentHour),
-                icon: icon,
-                temperature: roundedTemp,
-                precipitation: Self.intValue(current["precip"]) ?? 0,
-                condition: condition.isEmpty ? "현재 날씨" : condition
-            )
-            let weatherCache = Self.loadCachedHours()
-            let parsedForecastDays = Self.prependCachedHistory(
-                to: Self.prependYesterday(to: Self.parseForecastDays(from: firstWeather), cache: weatherCache),
-                cache: weatherCache
-            )
-            let cachedForecastDays = Self.mergeCachedHours(in: parsedForecastDays, currentHour: currentForecastHour, cache: weatherCache)
-            Self.saveCachedHours(days: cachedForecastDays, existingCache: weatherCache)
-            let forecastDays = Self.fillMissingHours(in: cachedForecastDays)
-            let todayKey = Self.dateKey(for: Date())
-            let forecastHours = forecastDays.first(where: { $0.dateKey == todayKey })?.hours
-                ?? forecastDays.first?.hours
-                ?? Self.parseForecastHours(from: firstWeather)
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.weatherRequestInFlight = false
-                let tempText = "\(roundedTemp)°C"
-                let widgetChanged = self.weatherIconText != icon
-                    || self.weatherPlaceText != "수원"
-                    || self.weatherTempText != tempText
-                let forecastChanged = self.forecastHours != forecastHours || self.forecastDays != forecastDays
-
-                self.weatherIconText = icon
+        WeatherService.load(location: .home) { [weak self] result in
+            guard let self else { return }
+            self.weatherRequestInFlight = false
+            switch result {
+            case .success(let snapshot):
+                self.weatherError = nil
+                self.weatherIconText = snapshot.icon
                 self.weatherPlaceText = "수원"
-                self.weatherTempText = tempText
-                self.forecastHours = forecastHours
-                self.forecastDays = forecastDays
-
-                if forecastChanged {
-                    self.updateForecastPanel()
-                }
-                if widgetChanged {
-                    self.markLayoutDirty()
-                    self.fitWindowToContent()
+                self.weatherTempText = "\(snapshot.temperature)°C"
+                self.forecastHours = snapshot.hours
+                self.forecastDays = snapshot.days
+                self.updateForecastPanel()
+                self.markLayoutDirty()
+                self.fitWindowToContent()
+                self.needsDisplay = true
+            case .failure(let error):
+                self.weatherError = error.localizedDescription
+                if self.forecastDays.isEmpty {
+                    self.weatherTempText = "--°C"
+                    (self.forecastPanel?.contentView as? ForecastView)?.showHomeError(error.localizedDescription)
                     self.needsDisplay = true
                 }
             }
-        }.resume()
-    }
-
-    private static func parseForecastHours(from weather: [String: Any]) -> [ForecastHour] {
-        guard
-            let forecast = weather["forecast"] as? [String: Any],
-            let days = forecast["days"] as? [[String: Any]],
-            let firstDay = days.first
-        else {
-            return []
         }
-
-        return parseForecastHours(fromDay: firstDay)
-    }
-
-    private static func parseForecastHours(fromDay dayData: [String: Any]) -> [ForecastHour] {
-        guard let hourly = dayData["hourly"] as? [[String: Any]] else {
-            return []
-        }
-
-        let calendar = weatherCalendar
-
-        let parsed = hourly.compactMap { hourData -> (Int, ForecastHour)? in
-            guard
-                let validText = stringValue(hourData["valid"]),
-                let date = weatherISOFormatter.date(from: validText)
-            else {
-                return nil
-            }
-
-            let hour = calendar.component(.hour, from: date)
-            let condition = stringValue(hourData["cap"]) ?? stringValue(hourData["pvdrCap"]) ?? "예보 없음"
-            return (
-                hour,
-                ForecastHour(
-                    hour: hour,
-                    timeText: hourLabel(for: hour),
-                    icon: weatherIcon(for: condition),
-                    temperature: intValue(hourData["temp"]) ?? 0,
-                    precipitation: intValue(hourData["precip"]) ?? 0,
-                    condition: condition
-                )
-            )
-        }
-
-        var byHour: [Int: ForecastHour] = [:]
-        for (hour, forecast) in parsed {
-            byHour[hour] = forecast
-        }
-        return (0..<24).map { hour in
-            byHour[hour] ?? ForecastHour(
-                hour: hour,
-                timeText: hourLabel(for: hour),
-                icon: "·",
-                temperature: nil,
-                precipitation: nil,
-                condition: "예보 없음"
-            )
-        }
-    }
-
-    private static func hourLabel(for hour: Int) -> String {
-        if hour < 12 {
-            return "오전 \(hour)시"
-        }
-        if hour == 12 {
-            return "오후 12시"
-        }
-        return "오후 \(hour - 12)시"
-    }
-
-    private static func parseForecastDays(from weather: [String: Any]) -> [ForecastDay] {
-        guard
-            let forecast = weather["forecast"] as? [String: Any],
-            let days = forecast["days"] as? [[String: Any]]
-        else {
-            return []
-        }
-
-        return days.compactMap { dayData in
-            guard let daily = dayData["daily"] as? [String: Any] else { return nil }
-            let day = daily["day"] as? [String: Any]
-            let night = daily["night"] as? [String: Any]
-
-            let condition = stringValue(daily["pvdrCap"])
-                ?? stringValue(day?["cap"])
-                ?? stringValue(night?["cap"])
-                ?? "예보 없음"
-            let summary = stringValue(day?["summary"])
-                ?? stringValue(night?["summary"])
-                ?? condition
-            let validText = stringValue(daily["valid"])
-            let date = validText.flatMap { weatherISOFormatter.date(from: $0) }
-            let dateText = date.map { weatherShortDateFormatter.string(from: $0) } ?? ""
-            let dateKey = date.map { Self.dateKey(for: $0) } ?? dateText
-            let weekdayText = date.map { weatherWeekdayFormatter.string(from: $0) } ?? ""
-            let hourlyTitle = date.map { weatherHourlyTitleFormatter.string(from: $0) } ?? dateText
-            let hours = parseForecastHours(fromDay: dayData)
-
-            return ForecastDay(
-                dateKey: dateKey,
-                dateText: dateText,
-                weekdayText: weekdayText,
-                hourlyTitle: hourlyTitle,
-                icon: weatherIcon(for: condition),
-                condition: condition,
-                highTemp: intValue(daily["tempHi"]) ?? 0,
-                lowTemp: intValue(daily["tempLo"]) ?? 0,
-                precipitation: intValue(daily["precip"]) ?? 0,
-                summary: summary,
-                hours: hours
-            )
-        }
-    }
-
-    private static func prependYesterday(to days: [ForecastDay], cache: [String: ForecastHour]) -> [ForecastDay] {
-        guard let firstDay = days.first else { return days }
-        guard let yesterday = weatherCalendar.date(byAdding: .day, value: -1, to: Date()) else {
-            return days
-        }
-
-        let yesterdayKey = dateKey(for: yesterday)
-        if firstDay.dateKey == yesterdayKey {
-            return days
-        }
-
-        let cachedHours = cachedHours(for: yesterdayKey, cache: cache)
-        let availableHours = cachedHours.filter { $0.temperature != nil }
-        let highTemp = availableHours.compactMap(\.temperature).max() ?? firstDay.highTemp
-        let lowTemp = availableHours.compactMap(\.temperature).min() ?? firstDay.lowTemp
-        let representativeHour = availableHours.last ?? availableHours.first
-        let precipitation = availableHours.compactMap(\.precipitation).max() ?? firstDay.precipitation
-        let yesterdayDay = ForecastDay(
-            dateKey: yesterdayKey,
-            dateText: formattedDate(yesterday, format: "M.d"),
-            weekdayText: formattedDate(yesterday, format: "E"),
-            hourlyTitle: formattedDate(yesterday, format: "M.d E"),
-            icon: representativeHour?.icon ?? firstDay.icon,
-            condition: representativeHour?.condition ?? firstDay.condition,
-            highTemp: highTemp,
-            lowTemp: lowTemp,
-            precipitation: precipitation,
-            summary: representativeHour?.condition ?? firstDay.summary,
-            hours: cachedHours
-        )
-
-        return [yesterdayDay] + days
-    }
-
-    private static func prependCachedHistory(to days: [ForecastDay], cache: [String: ForecastHour]) -> [ForecastDay] {
-        guard let firstDay = days.first else { return days }
-        let existingDateKeys = Set(days.map(\.dateKey))
-        let cachedDateKeys = Set(cache.keys.compactMap { key -> String? in
-            guard key.count >= 10 else { return nil }
-            return String(key.prefix(10))
-        })
-
-        let previousDays = cachedDateKeys
-            .filter { dateKey in
-                dateKey < firstDay.dateKey && !existingDateKeys.contains(dateKey)
-            }
-            .sorted()
-            .suffix(14)
-            .compactMap { cachedDay(from: $0, fallback: firstDay, cache: cache) }
-
-        return previousDays + days
-    }
-
-    private static func cachedDay(from dateKey: String, fallback: ForecastDay, cache: [String: ForecastHour]) -> ForecastDay? {
-        let hours = (0..<24).map { hour in
-            cache[hourCacheKey(dateKey: dateKey, hour: hour)] ?? ForecastHour(
-                hour: hour,
-                timeText: hourLabel(for: hour),
-                icon: "·",
-                temperature: nil,
-                precipitation: nil,
-                condition: "예보 없음"
-            )
-        }
-        let availableHours = hours.filter { $0.temperature != nil }
-        guard !availableHours.isEmpty else { return nil }
-
-        let date = date(fromKey: dateKey) ?? Date()
-        let representativeHour = availableHours.last ?? availableHours.first
-        return ForecastDay(
-            dateKey: dateKey,
-            dateText: formattedDate(date, format: "M.d"),
-            weekdayText: formattedDate(date, format: "E"),
-            hourlyTitle: formattedDate(date, format: "M.d E"),
-            icon: representativeHour?.icon ?? fallback.icon,
-            condition: representativeHour?.condition ?? fallback.condition,
-            highTemp: availableHours.compactMap(\.temperature).max() ?? fallback.highTemp,
-            lowTemp: availableHours.compactMap(\.temperature).min() ?? fallback.lowTemp,
-            precipitation: availableHours.compactMap(\.precipitation).max() ?? fallback.precipitation,
-            summary: representativeHour?.condition ?? fallback.summary,
-            hours: hours
-        )
-    }
-
-    private static func cachedHours(for dateKey: String, cache: [String: ForecastHour]) -> [ForecastHour] {
-        return (0..<24).map { hour in
-            cache[hourCacheKey(dateKey: dateKey, hour: hour)] ?? ForecastHour(
-                hour: hour,
-                timeText: hourLabel(for: hour),
-                icon: "·",
-                temperature: nil,
-                precipitation: nil,
-                condition: "예보 없음"
-            )
-        }
-    }
-
-    private static func formattedDate(_ date: Date, format: String) -> String {
-        switch format {
-        case "M.d":
-            return weatherShortDateFormatter.string(from: date)
-        case "E":
-            return weatherWeekdayFormatter.string(from: date)
-        case "M.d E":
-            return weatherHourlyTitleFormatter.string(from: date)
-        default:
-            let formatter = DateFormatter()
-            formatter.locale = weatherKoreanLocale
-            formatter.timeZone = weatherTimeZone
-            formatter.dateFormat = format
-            return formatter.string(from: date)
-        }
-    }
-
-    private static let weatherTimeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-    private static let weatherKoreanLocale = Locale(identifier: "ko_KR")
-    private static let weatherPOSIXLocale = Locale(identifier: "en_US_POSIX")
-    private static let weatherISOFormatter = ISO8601DateFormatter()
-    private static let weatherShortDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = weatherKoreanLocale
-        formatter.timeZone = weatherTimeZone
-        formatter.dateFormat = "M.d"
-        return formatter
-    }()
-    private static let weatherWeekdayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = weatherKoreanLocale
-        formatter.timeZone = weatherTimeZone
-        formatter.dateFormat = "E"
-        return formatter
-    }()
-    private static let weatherHourlyTitleFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = weatherKoreanLocale
-        formatter.timeZone = weatherTimeZone
-        formatter.dateFormat = "M.d E"
-        return formatter
-    }()
-    private static let weatherKeyFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = weatherPOSIXLocale
-        formatter.timeZone = weatherTimeZone
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
-    private static let weatherCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = weatherTimeZone
-        return calendar
-    }()
-
-    private static func dateKey(for date: Date) -> String {
-        weatherKeyFormatter.string(from: date)
-    }
-
-    private static func date(fromKey dateKey: String) -> Date? {
-        weatherKeyFormatter.date(from: dateKey)
-    }
-
-    private static func hourCacheKey(dateKey: String, hour: Int) -> String {
-        "\(dateKey)-\(String(format: "%02d", hour))"
-    }
-
-    private static func loadCachedHours() -> [String: ForecastHour] {
-        guard
-            let data = UserDefaults.standard.data(forKey: weatherCacheKey),
-            let decoded = try? JSONDecoder().decode([String: ForecastHour].self, from: data)
-        else {
-            return [:]
-        }
-        return decoded
-    }
-
-    private static func saveCachedHours(days: [ForecastDay], existingCache: [String: ForecastHour]) {
-        var cache = existingCache
-        for day in days {
-            for hour in day.hours where hour.temperature != nil {
-                cache[hourCacheKey(dateKey: day.dateKey, hour: hour.hour)] = hour
-            }
-        }
-
-        if cache.count > 720 {
-            for key in cache.keys.sorted().dropLast(720) {
-                cache.removeValue(forKey: key)
-            }
-        }
-
-        guard cache != existingCache else { return }
-        guard let data = try? JSONEncoder().encode(cache) else { return }
-        UserDefaults.standard.set(data, forKey: weatherCacheKey)
-    }
-
-    private static func mergeCachedHours(in days: [ForecastDay], currentHour: ForecastHour, cache: [String: ForecastHour]) -> [ForecastDay] {
-        let todayKey = dateKey(for: Date())
-
-        return days.map { day in
-            var merged = day.hours.map { hour -> ForecastHour in
-                if hour.temperature != nil {
-                    return hour
-                }
-                return cache[hourCacheKey(dateKey: day.dateKey, hour: hour.hour)] ?? hour
-            }
-
-            if day.dateKey == todayKey, merged.indices.contains(currentHour.hour), merged[currentHour.hour].temperature == nil {
-                merged[currentHour.hour] = currentHour
-            }
-
-            return day.replacingHours(merged)
-        }
-    }
-
-    private static func fillMissingHours(in days: [ForecastDay]) -> [ForecastDay] {
-        days.map { day in
-            day.replacingHours(fillMissingHours(day.hours, for: day))
-        }
-    }
-
-    private static func fillMissingHours(_ hours: [ForecastHour], for day: ForecastDay) -> [ForecastHour] {
-        guard !hours.isEmpty else { return hours }
-        let available = hours.filter { $0.temperature != nil }
-
-        return hours.map { hour in
-            guard hour.temperature == nil else { return hour }
-
-            let previous = available.last { $0.hour < hour.hour }
-            let next = available.first { $0.hour > hour.hour }
-            let reference = nearestReference(for: hour.hour, previous: previous, next: next)
-            let temperature = estimatedTemperature(for: hour.hour, day: day, previous: previous, next: next)
-
-            return ForecastHour(
-                hour: hour.hour,
-                timeText: hour.timeText,
-                icon: reference?.icon ?? day.icon,
-                temperature: temperature,
-                precipitation: reference?.precipitation ?? day.precipitation,
-                condition: reference?.condition ?? day.condition
-            )
-        }
-    }
-
-    private static func nearestReference(for hour: Int, previous: ForecastHour?, next: ForecastHour?) -> ForecastHour? {
-        guard let previous else { return next }
-        guard let next else { return previous }
-        return hour - previous.hour <= next.hour - hour ? previous : next
-    }
-
-    private static func estimatedTemperature(for hour: Int, day: ForecastDay, previous: ForecastHour?, next: ForecastHour?) -> Int {
-        if
-            let previous,
-            let next,
-            let previousTemp = previous.temperature,
-            let nextTemp = next.temperature
-        {
-            let span = max(1, next.hour - previous.hour)
-            let progress = Double(hour - previous.hour) / Double(span)
-            return Int((Double(previousTemp) + (Double(nextTemp - previousTemp) * progress)).rounded())
-        }
-
-        if let next, let nextTemp = next.temperature {
-            let anchorHour = min(6, max(0, next.hour - 4))
-            let span = max(1, next.hour - anchorHour)
-            let progress = min(1, max(0, Double(hour - anchorHour) / Double(span)))
-            return Int((Double(day.lowTemp) + (Double(nextTemp - day.lowTemp) * progress)).rounded())
-        }
-
-        if let previous, let previousTemp = previous.temperature {
-            let span = max(1, 23 - previous.hour)
-            let progress = min(1, max(0, Double(hour - previous.hour) / Double(span)))
-            return Int((Double(previousTemp) + (Double(day.lowTemp - previousTemp) * progress)).rounded())
-        }
-
-        return day.lowTemp
-    }
-
-    private static func stringValue(_ value: Any?) -> String? {
-        if let value = value as? String, !value.isEmpty {
-            return value
-        }
-        return nil
-    }
-
-    private static func intValue(_ value: Any?) -> Int? {
-        if let value = value as? Int {
-            return value
-        }
-        if let value = value as? Double {
-            return Int(value.rounded())
-        }
-        if let value = value as? NSNumber {
-            return Int(truncating: value)
-        }
-        if let value = value as? String, let doubleValue = Double(value) {
-            return Int(doubleValue.rounded())
-        }
-        return nil
-    }
-
-    private static func weatherIcon(for condition: String) -> String {
-        if condition.contains("뇌우") || condition.contains("천둥") {
-            return "⛈️"
-        }
-        if condition.contains("눈") {
-            return "🌨️"
-        }
-        if condition.contains("비") || condition.contains("소나기") || condition.contains("이슬비") {
-            return "🌧️"
-        }
-        if condition.contains("안개") {
-            return "🌫️"
-        }
-        if condition.contains("흐림") || condition.contains("흐린") {
-            return "☁️"
-        }
-        if condition.contains("구름") || condition.contains("부분") {
-            return "🌤️"
-        }
-        if condition.contains("맑") {
-            return "☀️"
-        }
-        return "⛅"
     }
 
 }
@@ -1355,7 +810,20 @@ final class ForecastView: NSView {
     private var hourDisplayRows: [ForecastHourDisplay] = []
     private var dayDisplayRows: [ForecastDayDisplay] = []
     private let onDismiss: () -> Void
-    private let subtitle = "수원 인계동 기준"
+    private var location = WeatherLocation.home
+    private var homeHours: [ForecastHour]
+    private var homeDays: [ForecastDay]
+    private var forecastStatus = "예보를 불러오는 중…"
+    private var travelTask: URLSessionDataTask?
+    private var travelRequestID = UUID()
+    private var locationSearchPanel: NSPanel?
+    private let searchButton = NSButton()
+    private let homeButton = NSButton()
+    private let retryButton = NSButton()
+    private var subtitle: String {
+        if location.isHome { return "수원 인계동 · 기본 지역" }
+        return "\(location.name) · \(location.timeZoneIdentifier.isEmpty ? "한국 시간" : "현지 시간")"
+    }
     private var selectedDayIndex = 0
     private var dailyRowRects: [Int: NSRect] = [:]
     private let visibleDailyRowCount = 7
@@ -1427,6 +895,8 @@ final class ForecastView: NSView {
     init(frame frameRect: NSRect, hours: [ForecastHour], days: [ForecastDay], onDismiss: @escaping () -> Void) {
         self.hours = hours
         self.days = days
+        self.homeHours = hours
+        self.homeDays = days
         self.onDismiss = onDismiss
         super.init(frame: frameRect)
         wantsLayer = true
@@ -1438,6 +908,115 @@ final class ForecastView: NSView {
             self.hours = days[selectedDayIndex].hours
         }
         rebuildDisplayRows()
+        configureLocationControls()
+    }
+
+    deinit {
+        travelTask?.cancel()
+        locationSearchPanel?.orderOut(nil)
+    }
+
+    private func configureLocationControls() {
+        for (button, title, action, frame) in [
+            (searchButton, "지역 검색", #selector(openLocationSearch), NSRect(x: 292, y: bounds.height - 81, width: 88, height: 26)),
+            (homeButton, "기본 지역", #selector(showHomeLocation), NSRect(x: 384, y: bounds.height - 81, width: 98, height: 26)),
+            (retryButton, "다시 불러오기", #selector(retryForecast), NSRect(x: bounds.midX - 64, y: bounds.midY - 48, width: 128, height: 30))
+        ] {
+            button.title = title
+            button.target = self
+            button.action = action
+            button.frame = frame
+            button.bezelStyle = .rounded
+            button.font = .systemFont(ofSize: 11, weight: .semibold)
+            button.appearance = NSAppearance(named: .darkAqua)
+            addSubview(button)
+        }
+        homeButton.isEnabled = false
+        retryButton.isHidden = true
+        homeButton.toolTip = "수원 인계동 날씨로 돌아가기"
+    }
+
+    @objc private func openLocationSearch() {
+        if let panel = locationSearchPanel { panel.makeKeyAndOrderFront(nil); return }
+        guard let parent = window else { return }
+        let size = NSSize(width: 460, height: 440)
+        let panel = FloatingPanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+        let searchView = LocationSearchView(frame: NSRect(origin: .zero, size: size), onSelect: { [weak self] location in
+            self?.dismissLocationSearch()
+            self?.selectLocation(location)
+        }, onDismiss: { [weak self] in self?.dismissLocationSearch() })
+        panel.title = "여행지 날씨 찾기"
+        panel.contentView = searchView
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .statusBar
+        panel.hidesOnDeactivate = false
+        panel.setFrameOrigin(NSPoint(x: parent.frame.midX - size.width / 2, y: parent.frame.midY - size.height / 2))
+        locationSearchPanel = panel
+        parent.addChildWindow(panel, ordered: .above)
+        NSApp.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+        searchView.focusSearch()
+    }
+
+    private func dismissLocationSearch() {
+        guard let panel = locationSearchPanel else { return }
+        window?.removeChildWindow(panel)
+        panel.orderOut(nil)
+        panel.contentView = nil
+        locationSearchPanel = nil
+        window?.makeKey()
+        window?.makeFirstResponder(self)
+    }
+
+    func prepareForDismissal() {
+        travelRequestID = UUID()
+        travelTask?.cancel()
+        dismissLocationSearch()
+    }
+
+    @objc private func showHomeLocation() { selectLocation(.home) }
+    @objc private func retryForecast() { selectLocation(location, forceReload: true) }
+
+    private func selectLocation(_ location: WeatherLocation, forceReload: Bool = false) {
+        travelTask?.cancel()
+        travelRequestID = UUID()
+        let token = travelRequestID
+        self.location = location
+        homeButton.isEnabled = !location.isHome
+        retryButton.isHidden = true
+        selectedDayIndex = 0
+        dailyListOffset = 0
+        applyForecast(hours: [], days: [])
+        forecastStatus = "\(location.name) 예보를 불러오는 중…"
+        if location.isHome && !forceReload && !homeDays.isEmpty {
+            applyForecast(hours: homeHours, days: homeDays)
+            return
+        }
+        travelTask = WeatherService.load(location: location) { [weak self] result in
+            guard let self, self.travelRequestID == token else { return }
+            self.travelTask = nil
+            switch result {
+            case .success(let snapshot):
+                if location.isHome {
+                    self.homeHours = snapshot.hours
+                    self.homeDays = snapshot.days
+                }
+                self.applyForecast(hours: snapshot.hours, days: snapshot.days)
+            case .failure(let error):
+                self.forecastStatus = error.localizedDescription
+                self.retryButton.isHidden = false
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    func showHomeError(_ message: String) {
+        guard location.isHome, days.isEmpty else { return }
+        forecastStatus = message
+        retryButton.isHidden = false
+        needsDisplay = true
     }
 
     required init?(coder: NSCoder) {
@@ -1453,6 +1032,18 @@ final class ForecastView: NSView {
     }
 
     func update(hours: [ForecastHour], days: [ForecastDay]) {
+        homeHours = hours
+        homeDays = days
+        guard location.isHome else { return }
+        applyForecast(hours: hours, days: days)
+    }
+
+    private func applyForecast(hours: [ForecastHour], days: [ForecastDay]) {
+        dailyRowRects = [:]
+        dailyUpButtonRect = .zero
+        dailyDownButtonRect = .zero
+        dailyForecastScrollRect = .zero
+        retryButton.isHidden = true
         let hadNoDays = self.days.isEmpty
         let selectedDateKey = self.days.indices.contains(selectedDayIndex) ? self.days[selectedDayIndex].dateKey : nil
         self.days = days
@@ -1492,9 +1083,9 @@ final class ForecastView: NSView {
 
         if hours.isEmpty && days.isEmpty {
             drawText(
-                "예보를 불러오는 중",
+                forecastStatus,
                 in: NSRect(x: 18, y: bounds.midY - 12, width: bounds.width - 36, height: 24),
-                font: loadingFont,
+                font: hourlyEmptyFont,
                 color: loadingTextColor,
                 alignment: .center
             )
@@ -1603,7 +1194,7 @@ final class ForecastView: NSView {
 
         drawText(
             subtitle,
-            in: NSRect(x: 23, y: bounds.height - 73, width: 280, height: 18),
+            in: NSRect(x: 23, y: bounds.height - 73, width: 263, height: 18),
             font: headerSubtitleFont,
             color: headerSubtitleColor,
             alignment: .left
@@ -1692,7 +1283,7 @@ final class ForecastView: NSView {
         let grid = rect.insetBy(dx: 6, dy: 6)
         let cellWidth = grid.width / columns
         let cellHeight = grid.height / rows
-        let currentHour = Self.calendar.component(.hour, from: Date())
+        let currentHour = calendar.component(.hour, from: Date())
 
         for (index, hour) in hourDisplayRows.enumerated() {
             let column = CGFloat(index % 8)
@@ -1939,15 +1530,15 @@ final class ForecastView: NSView {
 
     private func refreshRelativeDayLabels() {
         let now = Date()
-        todayDateKey = Self.dateKey(for: now)
+        todayDateKey = dateKey(for: now)
         yesterdayDateKey = ""
         relativeDayLabels = [:]
         let labels = [(-1, "어제"), (0, "오늘"), (1, "내일"), (2, "모레")]
         for (offset, label) in labels {
-            guard let date = Self.calendar.date(byAdding: .day, value: offset, to: now) else {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: now) else {
                 continue
             }
-            let key = Self.dateKey(for: date)
+            let key = dateKey(for: date)
             if offset == -1 {
                 yesterdayDateKey = key
             }
@@ -1955,22 +1546,21 @@ final class ForecastView: NSView {
         }
     }
 
-    private static let calendar: Calendar = {
+    private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = timeZone
+        calendar.timeZone = location.timeZone
         return calendar
-    }()
+    }
 
-    private static let timeZone = TimeZone(identifier: "Asia/Seoul") ?? .current
-    private static let dateKeyFormatter: DateFormatter = {
+    private var dateKeyFormatter: DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
+        formatter.timeZone = location.timeZone
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
-    }()
+    }
 
-    private static func dateKey(for date: Date) -> String {
+    private func dateKey(for date: Date) -> String {
         dateKeyFormatter.string(from: date)
     }
 }
@@ -2456,6 +2046,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var weatherTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installTextEditingMenu()
         let initialFrame = Self.initialFrame()
         let view = ClockView(frame: NSRect(x: 0, y: 0, width: initialFrame.width, height: initialFrame.height))
         view.autoresizingMask = [.width, .height]
@@ -2493,6 +2084,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             view.fetchWeather()
         }
         weatherTimer?.tolerance = 60
+    }
+
+    private func installTextEditingMenu() {
+        // Native field editors route Command shortcuts through the application's menu.
+        let menu = NSMenu()
+        let editItem = NSMenuItem(title: "편집", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "편집")
+        for (title, action, key) in [
+            ("실행 취소", Selector(("undo:")), "z"),
+            ("잘라내기", #selector(NSText.cut(_:)), "x"),
+            ("복사", #selector(NSText.copy(_:)), "c"),
+            ("붙여넣기", #selector(NSText.paste(_:)), "v"),
+            ("전체 선택", #selector(NSText.selectAll(_:)), "a")
+        ] {
+            editMenu.addItem(NSMenuItem(title: title, action: action, keyEquivalent: key))
+        }
+        let redo = NSMenuItem(title: "다시 실행", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.insertItem(redo, at: 1)
+        editItem.submenu = editMenu
+        menu.addItem(editItem)
+        NSApp.mainMenu = menu
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
